@@ -1,4 +1,5 @@
 // Copyright 2020 Ross Light
+// Copyright 2024 Michael Stapelberg
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -35,8 +36,6 @@ import (
 	"runtime"
 	"strconv"
 	"sync"
-
-	_ "github.com/lib/pq"
 )
 
 const superuserName = "postgres"
@@ -45,10 +44,31 @@ const superuserName = "postgres"
 type Server struct {
 	dir     string
 	baseURL string
+	driver  string
 	conn    *sql.DB
 
 	exited  <-chan struct{}
 	waitErr error
+}
+
+// A Config configures a PostgreSQL test server.
+type Config struct {
+	driver string
+}
+
+// A Option changes something in Config.
+type Option func(*Config)
+
+// WithSQLDriver sets the SQL driver that postgrestest should use to connect to
+// the database. The default is "postgres" (implemented by github.com/lib/pq),
+// another tested choice is "pgx" (implemented by github.com/jackc/pgx).
+//
+// The general recommendation is to use the same driver as you already use for
+// the rest of your non-test code, to keep dependencies minimal.
+func WithSQLDriver(driver string) Option {
+	return func(c *Config) {
+		c.driver = driver
+	}
 }
 
 // Start starts a PostgreSQL server with an empty database and waits for it to
@@ -57,7 +77,15 @@ type Server struct {
 // Start looks for the programs "pg_ctl" and "initdb" in PATH. If these are not
 // found, then Start searches for them in /usr/lib/postgresql/*/bin, preferring
 // the highest version found.
-func Start(ctx context.Context) (_ *Server, err error) {
+func Start(ctx context.Context, opts ...Option) (_ *Server, err error) {
+	var cfg Config
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	if cfg.driver == "" {
+		cfg.driver = "postgres"
+	}
+
 	// Prepare data directory.
 	dir, err := ioutil.TempDir("", "postgrestest")
 	if err != nil {
@@ -119,7 +147,8 @@ func Start(ctx context.Context) (_ *Server, err error) {
 	}
 	exited := make(chan struct{})
 	srv := &Server{
-		dir: dir,
+		dir:    dir,
+		driver: cfg.driver,
 		baseURL: (&url.URL{
 			Scheme: "postgres",
 			Host:   fmt.Sprintf("localhost:%d", port),
@@ -134,7 +163,7 @@ func Start(ctx context.Context) (_ *Server, err error) {
 	}()
 
 	// Wait for server to come up healthy.
-	srv.conn, err = sql.Open("postgres", srv.DefaultDatabase())
+	srv.conn, err = sql.Open(cfg.driver, srv.DefaultDatabase())
 	if err != nil {
 		// Failure to open means the DSN is invalid. Connections aren't created
 		// until we ping.
@@ -179,7 +208,7 @@ func (srv *Server) NewDatabase(ctx context.Context) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	return sql.Open("postgres", dsn)
+	return sql.Open(srv.driver, dsn)
 }
 
 // CreateDatabase creates a new database on the server and returns its

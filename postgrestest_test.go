@@ -25,6 +25,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	_ "github.com/lib/pq"
 )
 
 const singleTestTime = 30 * time.Second
