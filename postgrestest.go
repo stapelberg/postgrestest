@@ -54,6 +54,7 @@ type Server struct {
 // A Config configures a PostgreSQL test server.
 type Config struct {
 	driver string
+	dir    string
 }
 
 // A Option changes something in Config.
@@ -71,6 +72,14 @@ func WithSQLDriver(driver string) Option {
 	}
 }
 
+// WithDir specifies a directory in which postgrestest should set up
+// PostgreSQL. By default, a temporary directory is used.
+func WithDir(dir string) Option {
+	return func(c *Config) {
+		c.dir = dir
+	}
+}
+
 // Start starts a PostgreSQL server with an empty database and waits for it to
 // accept connections.
 //
@@ -85,18 +94,26 @@ func Start(ctx context.Context, opts ...Option) (_ *Server, err error) {
 	if cfg.driver == "" {
 		cfg.driver = "postgres"
 	}
-
-	// Prepare data directory.
-	dir, err := ioutil.TempDir("", "postgrestest")
-	if err != nil {
-		return nil, fmt.Errorf("start postgres: %w", err)
-	}
-	defer func() {
+	if cfg.dir == "" {
+		var err error
+		// Prepare data directory.
+		cfg.dir, err = ioutil.TempDir("", "postgrestest")
 		if err != nil {
-			os.RemoveAll(dir)
+			return nil, fmt.Errorf("start postgres: %w", err)
 		}
-	}()
-	dataDir := filepath.Join(dir, "data")
+		defer func() {
+			if err != nil {
+				os.RemoveAll(cfg.dir)
+			}
+		}()
+	} else {
+		// The user specified a directory with known path.
+		// Prevent other processes from using the directory.
+		if err := lock(cfg.dir); err != nil {
+			return nil, err
+		}
+	}
+	dataDir := filepath.Join(cfg.dir, "data")
 	err = runCommand("initdb",
 		"--no-sync",
 		"--username="+superuserName,
@@ -112,7 +129,7 @@ func Start(ctx context.Context, opts ...Option) (_ *Server, err error) {
 		"full_page_writes = off\n"
 	err = ioutil.WriteFile(
 		filepath.Join(dataDir, "postgresql.conf"),
-		[]byte(fmt.Sprintf(configFormat, filepath.ToSlash(dir))),
+		[]byte(fmt.Sprintf(configFormat, filepath.ToSlash(cfg.dir))),
 		0666)
 	if err != nil {
 		return nil, fmt.Errorf("start postgres: %w", err)
@@ -122,7 +139,7 @@ func Start(ctx context.Context, opts ...Option) (_ *Server, err error) {
 	// On Unix systems, pg_ctl runs as a daemon.
 	// On Windows systems, pg_ctl runs in the foreground (not well-documented) and
 	// drops privileges as needed.
-	logFile := filepath.Join(dir, "log.txt")
+	logFile := filepath.Join(cfg.dir, "log.txt")
 	proc, err := command("pg_ctl", "start", "--no-wait", "--pgdata="+dataDir, "--log="+logFile)
 	if err != nil {
 		return nil, fmt.Errorf("start postgres: %w", err)
@@ -131,7 +148,7 @@ func Start(ctx context.Context, opts ...Option) (_ *Server, err error) {
 		return nil, fmt.Errorf("start postgres: %w", err)
 	}
 	exited := make(chan struct{})
-	host := dir
+	host := cfg.dir
 	if runtime.GOOS == "windows" && cfg.driver == "postgres" {
 		// TODO: remove the following hack once
 		// https://github.com/lib/pq/pull/1179 is merged:
@@ -157,7 +174,7 @@ func Start(ctx context.Context, opts ...Option) (_ *Server, err error) {
 		}
 	}
 	srv := &Server{
-		dir:    dir,
+		dir:    cfg.dir,
 		driver: cfg.driver,
 		baseURL: &url.URL{
 			Scheme: "postgres",
@@ -259,15 +276,19 @@ func (srv *Server) Cleanup() {
 	os.RemoveAll(srv.dir)
 }
 
-func (srv *Server) stop() {
+func shutdownPostgres(dir string) error {
 	// Use Immediate Shutdown mode. We don't care about data corruption.
 	// https://www.postgresql.org/docs/current/server-shutdown.html
 	//
 	// TODO(someday): What happens if this fails?
-	runCommand("pg_ctl", "stop",
-		"--pgdata="+filepath.Join(srv.dir, "data"),
+	return runCommand("pg_ctl", "stop",
+		"--pgdata="+filepath.Join(dir, "data"),
 		"--mode=immediate",
 		"--wait")
+}
+
+func (srv *Server) stop() {
+	shutdownPostgres(srv.dir)
 	<-srv.exited
 }
 
