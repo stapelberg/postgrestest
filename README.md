@@ -1,6 +1,7 @@
-# `zombiezen.com/go/postgrestest`
+# `github.com/stapelberg/postgrestest`
 
-[![Reference](https://pkg.go.dev/badge/zombiezen.com/go/postgrestest?tab=doc)](https://pkg.go.dev/zombiezen.com/go/postgrestest?tab=doc)
+[![Reference](https://pkg.go.dev/badge/github.com/stapelberg/postgrestest?tab=doc)](https://pkg.go.dev/github.com/stapelberg/postgrestest?tab=doc)
+[![tests](https://github.com/stapelberg/postgrestest/actions/workflows/build.yml/badge.svg)](https://github.com/stapelberg/postgrestest/actions/workflows/build.yml)
 [![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-v2.0%20adopted-ff69b4.svg)](CODE_OF_CONDUCT.md)
 
 Package `postgrestest` provides a test harness that starts an ephemeral
@@ -58,7 +59,7 @@ your operating system.
 To install the package:
 
 ```
-go get zombiezen.com/go/postgrestest
+go get github.com/stapelberg/postgrestest
 ```
 
 [PostgreSQL Downloads page]: https://www.postgresql.org/download/

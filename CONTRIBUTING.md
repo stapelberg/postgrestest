@@ -9,5 +9,5 @@ the [Code of Conduct][] for all interactions. If applicable, add unit tests for
 your change before sending out for review.
 
 [Code of Conduct]: CODE_OF_CONDUCT.md
-[issue tracker]: https://github.com/zombiezen/postgrestest/issues/new
-[open a pull request]: https://github.com/zombiezen/postgrestest/compare
+[issue tracker]: https://github.com/stapelberg/postgrestest/issues/new
+[open a pull request]: https://github.com/stapelberg/postgrestest/compare
