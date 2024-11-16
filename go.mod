@@ -14,8 +14,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-module zombiezen.com/go/postgrestest
+module github.com/stapelberg/postgrestest
 
-go 1.14
+go 1.22
 
 require github.com/lib/pq v1.8.0

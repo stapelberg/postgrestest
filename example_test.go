@@ -20,7 +20,7 @@ import (
 	"context"
 	"testing"
 
-	"zombiezen.com/go/postgrestest"
+	"github.com/stapelberg/postgrestest"
 )
 
 func Example() {
