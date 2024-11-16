@@ -256,15 +256,13 @@ func (srv *Server) NewDatabase(ctx context.Context) (*sql.DB, error) {
 // CreateDatabase creates a new database on the server and returns its
 // data source name.
 func (srv *Server) CreateDatabase(ctx context.Context) (string, error) {
-	dbName, err := randomString(16)
-	if err != nil {
-		return "", fmt.Errorf("new database: %w", err)
+	dbc := &DBCreator{
+		baseDSN: &dsn{
+			u: srv.baseURL,
+		},
+		db: srv.conn,
 	}
-	_, err = srv.conn.ExecContext(ctx, "CREATE DATABASE \""+dbName+"\";")
-	if err != nil {
-		return "", fmt.Errorf("new database: %w", err)
-	}
-	return srv.dsn(dbName), nil
+	return dbc.CreateDatabase(ctx)
 }
 
 // Cleanup shuts down the server and deletes any on-disk files the server used.
@@ -369,4 +367,69 @@ func randomString(n int) (string, error) {
 		return "", fmt.Errorf("generate random string: %w", err)
 	}
 	return enc.EncodeToString(bits), nil
+}
+
+type dsn struct {
+	u *url.URL
+}
+
+func dsnFromString(pgurl string) (*dsn, error) {
+	u, err := url.Parse(pgurl)
+	if err != nil {
+		return nil, err
+	}
+	return &dsn{u}, nil
+}
+
+func (d *dsn) DB() string {
+	return d.u.Query().Get("host")
+}
+
+func (d *dsn) WithPath(path string) string {
+	u := *d.u
+	u.Path = path
+	return dsnString(&u)
+}
+
+// DBCreator allows creating ephemeral databases (think CREATE DATABASE) within
+// the ephemeral PostgreSQL instance. This functionality is decoupled from the
+// [Server] so that it can work with a PostgreSQL instance that was created out
+// of process.
+type DBCreator struct {
+	baseDSN *dsn
+	db      *sql.DB
+}
+
+// NewDBCreator returns a database creator for the PostgreSQL instance
+// identified by the specified DSN.
+func NewDBCreator(pgurl string) (*DBCreator, error) {
+	baseDSN, err := dsnFromString(pgurl)
+	if err != nil {
+		return nil, err
+	}
+	if baseDSN.u.Host == "" {
+		baseDSN.u.Host = "localhost"
+	}
+	db, err := sql.Open("postgres", pgurl)
+	if err != nil {
+		return nil, err
+	}
+	db.SetMaxOpenConns(1)
+	return &DBCreator{
+		baseDSN: baseDSN,
+		db:      db,
+	}, nil
+}
+
+// CreateDatabase creates a new database on the server and returns its
+// data source name.
+func (c *DBCreator) CreateDatabase(ctx context.Context) (dsn string, _ error) {
+	dbName, err := randomString(16)
+	if err != nil {
+		return "", fmt.Errorf("new database: %w", err)
+	}
+	if _, err := c.db.ExecContext(ctx, "CREATE DATABASE \""+dbName+"\";"); err != nil {
+		return "", fmt.Errorf("new database: %w", err)
+	}
+	return c.baseDSN.WithPath(dbName), nil
 }
