@@ -55,7 +55,14 @@ jobs:
         go-version: ^1.23
 
     - name: Run tests
-      run: go test -race -v ./...
+      # Run the test program with TMP set to the same drive as the Go
+      # installation and postgrestest package checkout.
+      #
+      # See the HACK comment in postgrestest.go for more details.
+      shell: cmd
+      run: |
+        set TMP=${{ runner.temp }}
+        go test -race -v ./...
 
   macos:
     name: macOS

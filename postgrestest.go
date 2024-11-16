@@ -28,13 +28,13 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
-	"net"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -43,8 +43,8 @@ const superuserName = "postgres"
 // A Server represents a running PostgreSQL server.
 type Server struct {
 	dir     string
-	baseURL string
 	driver  string
+	baseURL *url.URL
 	conn    *sql.DB
 
 	exited  <-chan struct{}
@@ -96,38 +96,23 @@ func Start(ctx context.Context, opts ...Option) (_ *Server, err error) {
 			os.RemoveAll(dir)
 		}
 	}()
-	superuserPassword, err := randomString(16)
-	if err != nil {
-		return nil, fmt.Errorf("start postgres: %w", err)
-	}
-	pwFile := filepath.Join(dir, "password")
-	err = ioutil.WriteFile(pwFile, []byte(superuserPassword), 0600)
-	if err != nil {
-		return nil, fmt.Errorf("start postgres: %w", err)
-	}
 	dataDir := filepath.Join(dir, "data")
 	err = runCommand("initdb",
 		"--no-sync",
 		"--username="+superuserName,
-		"--pwfile="+pwFile,
 		"-D", dataDir)
 	if err != nil {
 		return nil, fmt.Errorf("start postgres: %w", err)
 	}
-	port, err := findUnusedTCPPort()
-	if err != nil {
-		return nil, fmt.Errorf("start postgres: %w", err)
-	}
 	const configFormat = "" +
-		"listen_addresses = localhost\n" +
-		"port = %d\n" +
-		"unix_socket_directories = ''\n" +
+		"listen_addresses = ''\n" +
+		"unix_socket_directories = '%s'\n" +
 		"fsync = off\n" +
 		"synchronous_commit = off\n" +
 		"full_page_writes = off\n"
 	err = ioutil.WriteFile(
 		filepath.Join(dataDir, "postgresql.conf"),
-		[]byte(fmt.Sprintf(configFormat, port)),
+		[]byte(fmt.Sprintf(configFormat, filepath.ToSlash(dir))),
 		0666)
 	if err != nil {
 		return nil, fmt.Errorf("start postgres: %w", err)
@@ -146,15 +131,44 @@ func Start(ctx context.Context, opts ...Option) (_ *Server, err error) {
 		return nil, fmt.Errorf("start postgres: %w", err)
 	}
 	exited := make(chan struct{})
+	host := dir
+	if runtime.GOOS == "windows" && cfg.driver == "postgres" {
+		// TODO: remove the following hack once
+		// https://github.com/lib/pq/pull/1179 is merged:
+		//
+		// HACK: Turn a file path like C:\Users\Michael into a relative path
+		// from the root of the current drive, i.e. strip the C: volume name
+		// and turn the backslashes into forward slashes: /Users/Michael
+		//
+		// This is required because github.com/lib/pq uses path.Join (not
+		// filepath.Join) and requires the path to start with a / (instead of
+		// recognizing paths with filepath.IsAbs):
+		// https://github.com/lib/pq/blob/3d613208bca2e74f2a20e04126ed30bcb5c4cc27/conn.go#L440-L441
+		//
+		// Of course, this hack only works as long as the current drive of the
+		// process is the same drive as the temporary directory. Typically, both
+		// are drive C:, so this should usually work.
+		//
+		// See also:
+		// https://learn.microsoft.com/en-us/dotnet/standard/io/file-path-formats
+		volName := filepath.VolumeName(host)
+		if volName != "" {
+			host = filepath.ToSlash(host[len(volName):])
+		}
+	}
 	srv := &Server{
 		dir:    dir,
 		driver: cfg.driver,
-		baseURL: (&url.URL{
+		baseURL: &url.URL{
 			Scheme: "postgres",
-			Host:   fmt.Sprintf("localhost:%d", port),
-			User:   url.UserPassword(superuserName, superuserPassword),
+			Host:   "localhost",
+			User:   url.UserPassword(superuserName, ""),
 			Path:   "/",
-		}).String(),
+			RawQuery: (&url.Values{
+				"host":    []string{host},
+				"sslmode": []string{"disable"},
+			}).Encode(),
+		},
 		exited: exited,
 	}
 	go func() {
@@ -198,8 +212,19 @@ func (srv *Server) DefaultDatabase() string {
 	return srv.dsn("postgres")
 }
 
+func dsnString(u *url.URL) string {
+	dsn := u.String()
+	// We need to set a non-empty Host, otherwise the / separating hostname and
+	// path will be missing from the String() representation. Hence, we replace
+	// the first 'localhost' Host with the empty string textually:
+	dsn = strings.Replace(dsn, "localhost", "", 1)
+	return dsn
+}
+
 func (srv *Server) dsn(dbName string) string {
-	return srv.baseURL + dbName + "?sslmode=disable"
+	u := *srv.baseURL
+	u.Path = dbName
+	return dsnString(&u)
 }
 
 // NewDatabase opens a connection to a freshly created database on the server.
@@ -314,20 +339,6 @@ func runCommand(name string, args ...string) error {
 		return fmt.Errorf("%s: %w", name, err)
 	}
 	return nil
-}
-
-func findUnusedTCPPort() (int, error) {
-	l, err := net.ListenTCP("tcp", &net.TCPAddr{
-		IP: net.IPv4(127, 0, 0, 1),
-	})
-	if err != nil {
-		return 0, fmt.Errorf("find unused tcp port: %w", err)
-	}
-	port := l.Addr().(*net.TCPAddr).Port
-	if err := l.Close(); err != nil {
-		return 0, fmt.Errorf("find unused tcp port: %w", err)
-	}
-	return port, nil
 }
 
 func randomString(n int) (string, error) {
