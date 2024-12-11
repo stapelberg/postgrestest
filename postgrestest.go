@@ -148,31 +148,6 @@ func Start(ctx context.Context, opts ...Option) (_ *Server, err error) {
 		return nil, fmt.Errorf("start postgres: %w", err)
 	}
 	exited := make(chan struct{})
-	host := cfg.dir
-	if runtime.GOOS == "windows" && cfg.driver == "postgres" {
-		// TODO: remove the following hack once
-		// https://github.com/lib/pq/pull/1179 is merged:
-		//
-		// HACK: Turn a file path like C:\Users\Michael into a relative path
-		// from the root of the current drive, i.e. strip the C: volume name
-		// and turn the backslashes into forward slashes: /Users/Michael
-		//
-		// This is required because github.com/lib/pq uses path.Join (not
-		// filepath.Join) and requires the path to start with a / (instead of
-		// recognizing paths with filepath.IsAbs):
-		// https://github.com/lib/pq/blob/3d613208bca2e74f2a20e04126ed30bcb5c4cc27/conn.go#L440-L441
-		//
-		// Of course, this hack only works as long as the current drive of the
-		// process is the same drive as the temporary directory. Typically, both
-		// are drive C:, so this should usually work.
-		//
-		// See also:
-		// https://learn.microsoft.com/en-us/dotnet/standard/io/file-path-formats
-		volName := filepath.VolumeName(host)
-		if volName != "" {
-			host = filepath.ToSlash(host[len(volName):])
-		}
-	}
 	srv := &Server{
 		dir:    cfg.dir,
 		driver: cfg.driver,
@@ -182,7 +157,7 @@ func Start(ctx context.Context, opts ...Option) (_ *Server, err error) {
 			User:   url.UserPassword(superuserName, ""),
 			Path:   "/",
 			RawQuery: (&url.Values{
-				"host":    []string{host},
+				"host":    []string{cfg.dir},
 				"sslmode": []string{"disable"},
 			}).Encode(),
 		},

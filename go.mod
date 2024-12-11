@@ -18,4 +18,4 @@ module github.com/stapelberg/postgrestest
 
 go 1.22
 
-require github.com/lib/pq v1.8.0
+require github.com/lib/pq v1.10.10-0.20241116184759-b7ffbd3b47da
