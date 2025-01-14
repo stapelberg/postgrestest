@@ -58,7 +58,7 @@ type Config struct {
 }
 
 // A Option changes something in Config.
-type Option func(*Config)
+type Option func(any)
 
 // WithSQLDriver sets the SQL driver that postgrestest should use to connect to
 // the database. The default is "postgres" (implemented by github.com/lib/pq),
@@ -67,16 +67,24 @@ type Option func(*Config)
 // The general recommendation is to use the same driver as you already use for
 // the rest of your non-test code, to keep dependencies minimal.
 func WithSQLDriver(driver string) Option {
-	return func(c *Config) {
-		c.driver = driver
+	return func(c any) {
+		switch c := c.(type) {
+		case *Config:
+			c.driver = driver
+		case *DBCreator:
+			c.driver = driver
+		}
 	}
 }
 
 // WithDir specifies a directory in which postgrestest should set up
 // PostgreSQL. By default, a temporary directory is used.
 func WithDir(dir string) Option {
-	return func(c *Config) {
-		c.dir = dir
+	return func(c any) {
+		switch c := c.(type) {
+		case *Config:
+			c.dir = dir
+		}
 	}
 }
 
@@ -371,13 +379,16 @@ func (d *dsn) WithPath(path string) string {
 // [Server] so that it can work with a PostgreSQL instance that was created out
 // of process.
 type DBCreator struct {
+	// config
+	driver string
+
 	baseDSN *dsn
 	db      *sql.DB
 }
 
 // NewDBCreator returns a database creator for the PostgreSQL instance
 // identified by the specified DSN.
-func NewDBCreator(pgurl string) (*DBCreator, error) {
+func NewDBCreator(pgurl string, opts ...Option) (*DBCreator, error) {
 	baseDSN, err := dsnFromString(pgurl)
 	if err != nil {
 		return nil, err
@@ -385,15 +396,20 @@ func NewDBCreator(pgurl string) (*DBCreator, error) {
 	if baseDSN.u.Host == "" {
 		baseDSN.u.Host = "localhost"
 	}
-	db, err := sql.Open("postgres", pgurl)
+	dbc := &DBCreator{
+		driver:  "postgres",
+		baseDSN: baseDSN,
+	}
+	for _, opt := range opts {
+		opt(dbc)
+	}
+	db, err := sql.Open(dbc.driver, pgurl)
 	if err != nil {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	return &DBCreator{
-		baseDSN: baseDSN,
-		db:      db,
-	}, nil
+	dbc.db = db
+	return dbc, nil
 }
 
 // CreateDatabase creates a new database on the server and returns its
