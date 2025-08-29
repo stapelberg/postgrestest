@@ -117,7 +117,7 @@ func Start(ctx context.Context, opts ...Option) (_ *Server, err error) {
 	} else {
 		// The user specified a directory with known path.
 		// Prevent other processes from using the directory.
-		if err := lock(cfg.dir); err != nil {
+		if err := cfg.lock(); err != nil {
 			return nil, err
 		}
 	}
@@ -320,6 +320,7 @@ func findPostgresBin() {
 	if maxVersion < 0 {
 		return
 	}
+
 	postgresBin.dir = filepath.Join(dir, strconv.Itoa(maxVersion), "bin")
 }
 
