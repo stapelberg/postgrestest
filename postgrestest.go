@@ -54,6 +54,7 @@ type Server struct {
 type Config struct {
 	driver string
 	dir    string
+	binDir string
 }
 
 // A Option changes something in Config.
@@ -83,6 +84,17 @@ func WithDir(dir string) Option {
 		switch c := c.(type) {
 		case *Config:
 			c.dir = dir
+		}
+	}
+}
+
+// WithBinDir specifies which directory postgrestest should look for postgres
+// binaries.
+func WithBinDir(dir string) Option {
+	return func(c any) {
+		switch c := c.(type) {
+		case *Config:
+			c.binDir = dir
 		}
 	}
 }
@@ -278,6 +290,12 @@ func (cfg *Config) command(name string, args ...string) (*exec.Cmd, error) {
 	if runtime.GOOS == "windows" {
 		name += ".exe"
 	}
+	// Look in given binDir
+	if cfg.binDir != "" {
+		p := filepath.Join(cfg.binDir, name)
+		return exec.Command(p, args...), nil
+	}
+	// Look in path
 	p, lookErr := exec.LookPath(name)
 	if lookErr == nil {
 		return exec.Command(p, args...), nil
