@@ -68,7 +68,7 @@ func (cfg *Config) removeStaleAndTryLock() error {
 
 	// If we had to remove a stale lock, maybe there is a stale Postgres
 	// instance still running, too?
-	if err := shutdownPostgres(cfg.dir); err != nil {
+	if err := shutdownPostgres(cfg, cfg.dir); err != nil {
 		log.Printf("stale postgres cleanup failed: %v", err)
 	}
 

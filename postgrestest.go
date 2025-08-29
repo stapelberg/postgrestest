@@ -121,7 +121,7 @@ func Start(ctx context.Context, opts ...Option) (_ *Server, err error) {
 		}
 	}
 	dataDir := filepath.Join(cfg.dir, "data")
-	err = runCommand("initdb",
+	err = cfg.runCommand("initdb",
 		"--no-sync",
 		"--username="+superuserName,
 		"-D", dataDir)
@@ -147,7 +147,7 @@ func Start(ctx context.Context, opts ...Option) (_ *Server, err error) {
 	// On Windows systems, pg_ctl runs in the foreground (not well-documented) and
 	// drops privileges as needed.
 	logFile := filepath.Join(cfg.dir, "log.txt")
-	proc, err := command("pg_ctl", "start", "--no-wait", "--pgdata="+dataDir, "--log="+logFile)
+	proc, err := cfg.command("pg_ctl", "start", "--no-wait", "--pgdata="+dataDir, "--log="+logFile)
 	if err != nil {
 		return nil, fmt.Errorf("start postgres: %w", err)
 	}
@@ -255,26 +255,26 @@ func (srv *Server) Cleanup() {
 	os.RemoveAll(srv.cfg.dir)
 }
 
-func shutdownPostgres(dir string) error {
+func shutdownPostgres(cfg *Config, dir string) error {
 	// Use Immediate Shutdown mode. We don't care about data corruption.
 	// https://www.postgresql.org/docs/current/server-shutdown.html
 	//
 	// TODO(someday): What happens if this fails?
-	return runCommand("pg_ctl", "stop",
+	return cfg.runCommand("pg_ctl", "stop",
 		"--pgdata="+filepath.Join(dir, "data"),
 		"--mode=immediate",
 		"--wait")
 }
 
 func (srv *Server) stop() {
-	shutdownPostgres(srv.cfg.dir)
+	shutdownPostgres(srv.cfg, srv.cfg.dir)
 	<-srv.exited
 }
 
 // command creates an *exec.Cmd for the given PostgreSQL program. If it it
 // cannot find the program on the PATH, then it searches some well-known
 // PostgreSQL installation paths.
-func command(name string, args ...string) (*exec.Cmd, error) {
+func (cfg *Config) command(name string, args ...string) (*exec.Cmd, error) {
 	if runtime.GOOS == "windows" {
 		name += ".exe"
 	}
@@ -327,8 +327,8 @@ var postgresBin struct {
 	dir  string
 }
 
-func runCommand(name string, args ...string) error {
-	c, err := command(name, args...)
+func (cfg *Config) runCommand(name string, args ...string) error {
+	c, err := cfg.command(name, args...)
 	if err != nil {
 		return fmt.Errorf("%s: %w", name, err)
 	}
