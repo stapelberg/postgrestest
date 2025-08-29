@@ -42,8 +42,7 @@ const superuserName = "postgres"
 
 // A Server represents a running PostgreSQL server.
 type Server struct {
-	dir     string
-	driver  string
+	cfg     *Config
 	baseURL *url.URL
 	conn    *sql.DB
 
@@ -157,8 +156,7 @@ func Start(ctx context.Context, opts ...Option) (_ *Server, err error) {
 	}
 	exited := make(chan struct{})
 	srv := &Server{
-		dir:    cfg.dir,
-		driver: cfg.driver,
+		cfg: &cfg,
 		baseURL: &url.URL{
 			Scheme: "postgres",
 			Host:   "localhost",
@@ -233,7 +231,7 @@ func (srv *Server) NewDatabase(ctx context.Context) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	return sql.Open(srv.driver, dsn)
+	return sql.Open(srv.cfg.driver, dsn)
 }
 
 // CreateDatabase creates a new database on the server and returns its
@@ -254,7 +252,7 @@ func (srv *Server) Cleanup() {
 		srv.conn.Close()
 	}
 	srv.stop()
-	os.RemoveAll(srv.dir)
+	os.RemoveAll(srv.cfg.dir)
 }
 
 func shutdownPostgres(dir string) error {
@@ -269,7 +267,7 @@ func shutdownPostgres(dir string) error {
 }
 
 func (srv *Server) stop() {
-	shutdownPostgres(srv.dir)
+	shutdownPostgres(srv.cfg.dir)
 	<-srv.exited
 }
 
