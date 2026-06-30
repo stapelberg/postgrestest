@@ -1,4 +1,4 @@
-// Copyright 2020 Ross Light
+// Copyright 2020 Roxy Light
 // Copyright 2024 Michael Stapelberg
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -27,7 +27,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"net/url"
 	"os"
 	"os/exec"
@@ -105,7 +104,7 @@ func Start(ctx context.Context, opts ...Option) (_ *Server, err error) {
 	if cfg.dir == "" {
 		var err error
 		// Prepare data directory.
-		cfg.dir, err = ioutil.TempDir("", "postgrestest")
+		cfg.dir, err = os.MkdirTemp("", "postgrestest")
 		if err != nil {
 			return nil, fmt.Errorf("start postgres: %w", err)
 		}
@@ -135,7 +134,7 @@ func Start(ctx context.Context, opts ...Option) (_ *Server, err error) {
 		"fsync = off\n" +
 		"synchronous_commit = off\n" +
 		"full_page_writes = off\n"
-	err = ioutil.WriteFile(
+	err = os.WriteFile(
 		filepath.Join(dataDir, "postgresql.conf"),
 		[]byte(fmt.Sprintf(configFormat, filepath.ToSlash(cfg.dir))),
 		0666)
@@ -194,7 +193,7 @@ func Start(ctx context.Context, opts ...Option) (_ *Server, err error) {
 		select {
 		case <-ctx.Done():
 			srv.stop()
-			logOutput, _ := ioutil.ReadFile(logFile)
+			logOutput, _ := os.ReadFile(logFile)
 			if len(logOutput) == 0 {
 				return nil, fmt.Errorf("start postgres: %w", ctx.Err())
 			}
@@ -303,7 +302,7 @@ func findPostgresBin() {
 	if runtime.GOOS == "windows" {
 		dir = `C:\Program Files\PostgreSQL`
 	}
-	listing, err := ioutil.ReadDir(dir)
+	listing, err := os.ReadDir(dir)
 	if err != nil {
 		return
 	}
