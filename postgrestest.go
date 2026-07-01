@@ -212,6 +212,13 @@ func (srv *Server) DefaultDatabase() string {
 	return srv.dsn("postgres")
 }
 
+// TemplateDatabase returns the data source name of the "template1" database
+// used to create later databases.  You can use this to apply migrations or
+// even fixtures once for the life of a server.
+func (srv *Server) TemplateDatabase() string {
+	return srv.dsn("template1")
+}
+
 func dsnString(u *url.URL) string {
 	dsn := u.String()
 	// We need to set a non-empty Host, otherwise the / separating hostname and
