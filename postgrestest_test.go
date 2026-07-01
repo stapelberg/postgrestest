@@ -87,6 +87,42 @@ func TestNewDatabase(t *testing.T) {
 	}
 }
 
+func TestTemplateDatabase(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), singleTestTime)
+	defer cancel()
+
+	srv, err := Start(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(srv.Cleanup)
+
+	const createTableStmt = `CREATE TABLE foo (id SERIAL PRIMARY KEY);`
+
+	tmpDb, err := sql.Open("postgres", srv.TemplateDatabase())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tmpDb.Close()
+
+	_, err = tmpDb.ExecContext(ctx, createTableStmt)
+	if err != nil {
+		t.Fatal("CREATE TABLE in template database: ", err)
+	}
+	tmpDb.Close()
+
+	db1, err := srv.NewDatabase(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db1.Close()
+
+	_, err = db1.ExecContext(ctx, `SELECT 1 FROM "foo"`)
+	if err != nil {
+		t.Fatal("template table not copied and readable: ", err)
+	}
+}
+
 func BenchmarkStart(b *testing.B) {
 	ctx := context.Background()
 	for i := 0; i < b.N; i++ {
