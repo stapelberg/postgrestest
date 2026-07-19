@@ -27,21 +27,21 @@ import (
 	"syscall"
 )
 
-func lockfn(dir string) string {
-	return filepath.Join(dir, "lock")
+func (cfg *Config) lockfn() string {
+	return filepath.Join(cfg.dir, "lock")
 }
 
-func tryLock(dir string) error {
-	lockfn := lockfn(dir)
+func (cfg *Config) tryLock() error {
+	lockfn := cfg.lockfn()
 	lockf, err := os.OpenFile(lockfn, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
 	if err != nil {
 		if os.IsNotExist(err) {
 			// The parent directory does not exist.
 			// Create the directory and retry.
-			if err := os.MkdirAll(dir, 0755); err != nil {
+			if err := os.MkdirAll(cfg.dir, 0755); err != nil {
 				return err
 			}
-			return tryLock(dir)
+			return cfg.tryLock()
 		}
 		if os.IsExist(err) {
 			return fmt.Errorf("Lock file %s already exists -- did another process race us?", lockfn)
@@ -55,8 +55,8 @@ func tryLock(dir string) error {
 	return lockf.Close()
 }
 
-func removeStaleAndTryLock(dir string) error {
-	lockfn := lockfn(dir)
+func (cfg *Config) removeStaleAndTryLock() error {
+	lockfn := cfg.lockfn()
 	log.Printf("removing stale lockfile %s", lockfn)
 	if err := os.Remove(lockfn); err != nil {
 		if os.IsNotExist(err) {
@@ -68,27 +68,27 @@ func removeStaleAndTryLock(dir string) error {
 
 	// If we had to remove a stale lock, maybe there is a stale Postgres
 	// instance still running, too?
-	if err := shutdownPostgres(dir); err != nil {
+	if err := shutdownPostgres(cfg, cfg.dir); err != nil {
 		log.Printf("stale postgres cleanup failed: %v", err)
 	}
 
 	// Remove log.txt and data dir, otherwise starting a new instance will fail
-	if err := os.Remove(filepath.Join(dir, "log.txt")); err != nil {
+	if err := os.Remove(filepath.Join(cfg.dir, "log.txt")); err != nil {
 		log.Printf("stale postgres cleanup failed: %v", err)
 	}
-	if err := os.RemoveAll(filepath.Join(dir, "data")); err != nil {
+	if err := os.RemoveAll(filepath.Join(cfg.dir, "data")); err != nil {
 		log.Printf("stale postgres cleanup failed: %v", err)
 	}
 
-	return tryLock(dir)
+	return cfg.tryLock()
 }
 
-func lock(dir string) error {
-	b, err := os.ReadFile(lockfn(dir))
+func (cfg *Config) lock() error {
+	b, err := os.ReadFile(cfg.lockfn())
 	if err != nil {
 		if os.IsNotExist(err) {
 			// Lock available
-			return tryLock(dir)
+			return cfg.tryLock()
 		}
 		return err
 	}
@@ -100,11 +100,11 @@ func lock(dir string) error {
 	proc, err := os.FindProcess(int(lockPid))
 	if err != nil {
 		// stale lock file (non-unix systems)
-		return removeStaleAndTryLock(dir)
+		return cfg.removeStaleAndTryLock()
 	}
 	if err := proc.Signal(syscall.Signal(0)); err != nil {
 		// stale lock file (unix systems)
-		return removeStaleAndTryLock(dir)
+		return cfg.removeStaleAndTryLock()
 	}
 	return fmt.Errorf("already locked by pid %d", lockPid)
 }

@@ -41,8 +41,7 @@ const superuserName = "postgres"
 
 // A Server represents a running PostgreSQL server.
 type Server struct {
-	dir     string
-	driver  string
+	cfg     *Config
 	baseURL *url.URL
 	conn    *sql.DB
 
@@ -54,6 +53,7 @@ type Server struct {
 type Config struct {
 	driver string
 	dir    string
+	binDir string
 }
 
 // A Option changes something in Config.
@@ -87,6 +87,17 @@ func WithDir(dir string) Option {
 	}
 }
 
+// WithBinDir specifies which directory postgrestest should look for postgres
+// binaries.
+func WithBinDir(dir string) Option {
+	return func(c any) {
+		switch c := c.(type) {
+		case *Config:
+			c.binDir = dir
+		}
+	}
+}
+
 // Start starts a PostgreSQL server with an empty database and waits for it to
 // accept connections.
 //
@@ -116,12 +127,12 @@ func Start(ctx context.Context, opts ...Option) (_ *Server, err error) {
 	} else {
 		// The user specified a directory with known path.
 		// Prevent other processes from using the directory.
-		if err := lock(cfg.dir); err != nil {
+		if err := cfg.lock(); err != nil {
 			return nil, err
 		}
 	}
 	dataDir := filepath.Join(cfg.dir, "data")
-	err = runCommand("initdb",
+	err = cfg.runCommand("initdb",
 		"--no-sync",
 		"--username="+superuserName,
 		"-D", dataDir)
@@ -147,7 +158,7 @@ func Start(ctx context.Context, opts ...Option) (_ *Server, err error) {
 	// On Windows systems, pg_ctl runs in the foreground (not well-documented) and
 	// drops privileges as needed.
 	logFile := filepath.Join(cfg.dir, "log.txt")
-	proc, err := command("pg_ctl", "start", "--no-wait", "--pgdata="+dataDir, "--log="+logFile)
+	proc, err := cfg.command("pg_ctl", "start", "--no-wait", "--pgdata="+dataDir, "--log="+logFile)
 	if err != nil {
 		return nil, fmt.Errorf("start postgres: %w", err)
 	}
@@ -156,8 +167,7 @@ func Start(ctx context.Context, opts ...Option) (_ *Server, err error) {
 	}
 	exited := make(chan struct{})
 	srv := &Server{
-		dir:    cfg.dir,
-		driver: cfg.driver,
+		cfg: &cfg,
 		baseURL: &url.URL{
 			Scheme: "postgres",
 			Host:   "localhost",
@@ -239,7 +249,7 @@ func (srv *Server) NewDatabase(ctx context.Context) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	return sql.Open(srv.driver, dsn)
+	return sql.Open(srv.cfg.driver, dsn)
 }
 
 // CreateDatabase creates a new database on the server and returns its
@@ -260,32 +270,38 @@ func (srv *Server) Cleanup() {
 		srv.conn.Close()
 	}
 	srv.stop()
-	os.RemoveAll(srv.dir)
+	os.RemoveAll(srv.cfg.dir)
 }
 
-func shutdownPostgres(dir string) error {
+func shutdownPostgres(cfg *Config, dir string) error {
 	// Use Immediate Shutdown mode. We don't care about data corruption.
 	// https://www.postgresql.org/docs/current/server-shutdown.html
 	//
 	// TODO(someday): What happens if this fails?
-	return runCommand("pg_ctl", "stop",
+	return cfg.runCommand("pg_ctl", "stop",
 		"--pgdata="+filepath.Join(dir, "data"),
 		"--mode=immediate",
 		"--wait")
 }
 
 func (srv *Server) stop() {
-	shutdownPostgres(srv.dir)
+	shutdownPostgres(srv.cfg, srv.cfg.dir)
 	<-srv.exited
 }
 
 // command creates an *exec.Cmd for the given PostgreSQL program. If it it
 // cannot find the program on the PATH, then it searches some well-known
 // PostgreSQL installation paths.
-func command(name string, args ...string) (*exec.Cmd, error) {
+func (cfg *Config) command(name string, args ...string) (*exec.Cmd, error) {
 	if runtime.GOOS == "windows" {
 		name += ".exe"
 	}
+	// Look in given binDir
+	if cfg.binDir != "" {
+		p := filepath.Join(cfg.binDir, name)
+		return exec.Command(p, args...), nil
+	}
+	// Look in path
 	p, lookErr := exec.LookPath(name)
 	if lookErr == nil {
 		return exec.Command(p, args...), nil
@@ -326,6 +342,7 @@ func findPostgresBin() {
 	if maxVersion < 0 {
 		return
 	}
+
 	postgresBin.dir = filepath.Join(dir, strconv.Itoa(maxVersion), "bin")
 }
 
@@ -334,8 +351,8 @@ var postgresBin struct {
 	dir  string
 }
 
-func runCommand(name string, args ...string) error {
-	c, err := command(name, args...)
+func (cfg *Config) runCommand(name string, args ...string) error {
+	c, err := cfg.command(name, args...)
 	if err != nil {
 		return fmt.Errorf("%s: %w", name, err)
 	}
